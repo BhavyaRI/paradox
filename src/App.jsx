@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { PlusCircle, Trash2, DollarSign, TrendingUp } from 'lucide-react';
+import { PlusCircle, Trash2, DollarSign, TrendingUp, LogIn, UserPlus, Calendar } from 'lucide-react';
 import { Line } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
@@ -25,12 +25,25 @@ ChartJS.register(
 
 const expenseCategories = ['Food', 'Transportation', 'Entertainment', 'Bills', 'Other'];
 const investmentTypes = ['Stocks', 'Bonds', 'Real Estate', 'Crypto', 'Other'];
+const timeFilters = ['All Time', 'This Week', 'This Month', '6 Months', 'This Year', 'Custom Range'];
 
 function App() {
+  // Auth state
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isLoginView, setIsLoginView] = useState(true);
+  const [authError, setAuthError] = useState('');
+  const [user, setUser] = useState(null);
+  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+
   const [expenses, setExpenses] = useState([]);
   const [incomes, setIncomes] = useState([]);
   const [investments, setInvestments] = useState([]);
   const [activeTab, setActiveTab] = useState('expenses');
+  const [timeFilter, setTimeFilter] = useState('All Time');
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
 
   // Expense state
   const [expenseDesc, setExpenseDesc] = useState('');
@@ -49,22 +62,113 @@ function App() {
   const [investmentType, setInvestmentType] = useState('Stocks');
   const [investmentDate, setInvestmentDate] = useState(new Date().toISOString().split('T')[0]);
 
+  // Filter data based on selected time period
+  const filterDataByTime = (data) => {
+    const now = new Date();
+    const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfSixMonths = new Date(now.getFullYear(), now.getMonth() - 6, 1);
+    const startOfYear = new Date(now.getFullYear(), 0, 1);
+
+    return data.filter(item => {
+      const itemDate = new Date(item.date);
+      switch (timeFilter) {
+        case 'This Week':
+          return itemDate >= startOfWeek;
+        case 'This Month':
+          return itemDate >= startOfMonth;
+        case '6 Months':
+          return itemDate >= startOfSixMonths;
+        case 'This Year':
+          return itemDate >= startOfYear;
+        case 'Custom Range':
+          const start = customStartDate ? new Date(customStartDate) : new Date(0);
+          const end = customEndDate ? new Date(customEndDate) : new Date();
+          return itemDate >= start && itemDate <= end;
+        default:
+          return true;
+      }
+    });
+  };
+
+  // Get filtered data
+  const filteredExpenses = filterDataByTime(expenses);
+  const filteredIncomes = filterDataByTime(incomes);
+  const filteredInvestments = filterDataByTime(investments);
+
   useEffect(() => {
-    fetchAll();
+    const token = localStorage.getItem('token');
+    if (token) {
+      setIsAuthenticated(true);
+      fetchAll();
+    }
   }, []);
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    try {
+      const response = await axios.post('http://localhost:5000/api/login', {
+        email,
+        password
+      });
+      
+      localStorage.setItem('token', response.data.token);
+      setUser(response.data.user);
+      setIsAuthenticated(true);
+      setAuthError('');
+      fetchAll();
+    } catch (error) {
+      setAuthError(error.response?.data?.message || 'Login failed');
+    }
+  };
+
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    try {
+      const response = await axios.post('http://localhost:5000/api/register', {
+        username,
+        email,
+        password
+      });
+      
+      localStorage.setItem('token', response.data.token);
+      setUser(response.data.user);
+      setIsAuthenticated(true);
+      setAuthError('');
+      fetchAll();
+    } catch (error) {
+      setAuthError(error.response?.data?.message || 'Registration failed');
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    setIsAuthenticated(false);
+    setUser(null);
+    setExpenses([]);
+    setIncomes([]);
+    setInvestments([]);
+  };
+
+  const getAuthHeaders = () => ({
+    headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+  });
 
   const fetchAll = async () => {
     try {
       const [expensesRes, incomesRes, investmentsRes] = await Promise.all([
-        axios.get('http://localhost:5000/api/expenses'),
-        axios.get('http://localhost:5000/api/incomes'),
-        axios.get('http://localhost:5000/api/investments')
+        axios.get('http://localhost:5000/api/expenses', getAuthHeaders()),
+        axios.get('http://localhost:5000/api/incomes', getAuthHeaders()),
+        axios.get('http://localhost:5000/api/investments', getAuthHeaders())
       ]);
       setExpenses(expensesRes.data);
       setIncomes(incomesRes.data);
       setInvestments(investmentsRes.data);
     } catch (error) {
       console.error('Error fetching data:', error);
+      if (error.response?.status === 401) {
+        handleLogout();
+      }
     }
   };
 
@@ -75,8 +179,8 @@ function App() {
         description: expenseDesc,
         amount: parseFloat(expenseAmount),
         category: expenseCategory,
-        date: new Date(expenseDate)
-      });
+        date: expenseDate
+      }, getAuthHeaders());
       setExpenseDesc('');
       setExpenseAmount('');
       setExpenseCategory('Food');
@@ -93,8 +197,8 @@ function App() {
       await axios.post('http://localhost:5000/api/incomes', {
         source: incomeSource,
         amount: parseFloat(incomeAmount),
-        date: new Date(incomeDate)
-      });
+        date: incomeDate
+      }, getAuthHeaders());
       setIncomeSource('');
       setIncomeAmount('');
       setIncomeDate(new Date().toISOString().split('T')[0]);
@@ -111,8 +215,8 @@ function App() {
         name: investmentName,
         amount: parseFloat(investmentAmount),
         type: investmentType,
-        date: new Date(investmentDate)
-      });
+        date: investmentDate
+      }, getAuthHeaders());
       setInvestmentName('');
       setInvestmentAmount('');
       setInvestmentType('Stocks');
@@ -125,69 +229,143 @@ function App() {
 
   const handleDelete = async (id, type) => {
     try {
-      await axios.delete(`http://localhost:5000/api/${type}/${id}`);
+      await axios.delete(`http://localhost:5000/api/${type}/${id}`, getAuthHeaders());
       fetchAll();
     } catch (error) {
       console.error(`Error deleting ${type}:`, error);
     }
   };
 
-  const totalExpenses = expenses.reduce((sum, expense) => sum + expense.amount, 0);
-  const totalIncome = incomes.reduce((sum, income) => sum + income.amount, 0);
-  const totalInvestments = investments.reduce((sum, investment) => sum + investment.amount, 0);
-  const netWorth = totalIncome - totalExpenses;
-  
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="max-w-md w-full space-y-8 p-8 bg-white rounded-lg shadow-lg">
+          <div className="text-center">
+            <h2 className="text-3xl font-bold text-gray-900 mb-2">
+              {isLoginView ? 'Sign in to your account' : 'Create a new account'}
+            </h2>
+            <p className="text-sm text-gray-600">
+              {isLoginView ? "Don't have an account? " : "Already have an account? "}
+              <button
+                onClick={() => {
+                  setIsLoginView(!isLoginView);
+                  setAuthError('');
+                }}
+                className="text-emerald-600 hover:text-emerald-500 font-medium"
+              >
+                {isLoginView ? 'Sign up' : 'Sign in'}
+              </button>
+            </p>
+          </div>
+
+          {authError && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded relative" role="alert">
+              <span className="block sm:inline">{authError}</span>
+            </div>
+          )}
+
+          <form onSubmit={isLoginView ? handleLogin : handleRegister} className="space-y-6">
+            {!isLoginView && (
+              <div>
+                <label htmlFor="username" className="block text-sm font-medium text-gray-700">
+                  Username
+                </label>
+                <input
+                  id="username"
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-emerald-500 focus:ring focus:ring-emerald-200"
+                  required
+                />
+              </div>
+            )}
+            
+            <div>
+              <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+                Email address
+              </label>
+              <input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-emerald-500 focus:ring focus:ring-emerald-200"
+                required
+              />
+            </div>
+
+            <div>
+              <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+                Password
+              </label>
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-emerald-500 focus:ring focus:ring-emerald-200"
+                required
+              />
+            </div>
+
+            <button
+              type="submit"
+              className="w-full flex justify-center items-center gap-2 py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500"
+            >
+              {isLoginView ? (
+                <>
+                  <LogIn size={20} />
+                  Sign in
+                </>
+              ) : (
+                <>
+                  <UserPlus size={20} />
+                  Sign up
+                </>
+              )}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  const totalExpenses = filteredExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+  const totalIncome = filteredIncomes.reduce((sum, income) => sum + income.amount, 0);
+  const totalInvestments = filteredInvestments.reduce((sum, investment) => sum + investment.amount, 0);
+  const netWorth = totalIncome - totalExpenses - totalInvestments;
+
+  // Updated chart data logic to handle dates properly
   const chartData = {
-    labels: Array.from(new Set([
-      ...expenses.map(e => e.date),
-      ...incomes.map(i => i.date),
-      ...investments.map(inv => inv.date)
-    ]))
-    .sort((a, b) => new Date(a) - new Date(b))
-    .map(date => new Date(date).toLocaleDateString('en-GB')), 
+    labels: [...filteredExpenses, ...filteredIncomes, ...filteredInvestments]
+      .sort((a, b) => new Date(a.date) - new Date(b.date))
+      .map(item => new Date(item.date).toLocaleDateString()),
     datasets: [
       {
         label: 'Expenses',
-        data: expenses.reduce((acc, expense) => {
-          const date = new Date(expense.date).toLocaleDateString('en-GB');
-          const existingIndex = acc.findIndex(item => item.x === date);
-          if (existingIndex >= 0) {
-            acc[existingIndex].y -= expense.amount;
-          } else {
-            acc.push({ x: date, y: expense.amount });
-          }
-          return acc;
-        }, []).sort((a, b) => new Date(a.x) - new Date(b.x)),
+        data: filteredExpenses.map(expense => ({
+          x: new Date(expense.date).toLocaleDateString(),
+          y: -expense.amount
+        })),
         borderColor: 'rgb(239, 68, 68)',
         tension: 0.1
       },
       {
         label: 'Income',
-        data: incomes.reduce((acc, income) => {
-          const date = new Date(income.date).toLocaleDateString('en-GB');
-          const existingIndex = acc.findIndex(item => item.x === date);
-          if (existingIndex >= 0) {
-            acc[existingIndex].y += income.amount;
-          } else {
-            acc.push({ x: date, y: income.amount });
-          }
-          return acc;
-        }, []).sort((a, b) => new Date(a.x) - new Date(b.x)),
+        data: filteredIncomes.map(income => ({
+          x: new Date(income.date).toLocaleDateString(),
+          y: income.amount
+        })),
         borderColor: 'rgb(34, 197, 94)',
         tension: 0.1
       },
       {
         label: 'Investments',
-        data: investments.reduce((acc, investment) => {
-          const date = new Date(investment.date).toLocaleDateString('en-GB');
-          const existingIndex = acc.findIndex(item => item.x === date);
-          if (existingIndex >= 0) {
-            acc[existingIndex].y -= investment.amount;
-          } else {
-            acc.push({ x: date, y: investment.amount });
-          }
-          return acc;
-        }, []).sort((a, b) => new Date(a.x) - new Date(b.x)),
+        data: filteredInvestments.map(investment => ({
+          x: new Date(investment.date).toLocaleDateString(),
+          y: -investment.amount
+        })),
         borderColor: 'rgb(59, 130, 246)',
         tension: 0.1
       }
@@ -197,7 +375,59 @@ function App() {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-6xl mx-auto px-4 py-8">
-        <h1 className="text-3xl font-bold text-gray-800 mb-8">Financial Tracker</h1>
+        <div className="flex justify-between items-center mb-8">
+          <h1 className="text-3xl font-bold text-gray-800">Financial Tracker</h1>
+          <div className="flex items-center gap-4">
+            <span className="text-gray-600">Welcome, {user?.username}!</span>
+            <button
+              onClick={handleLogout}
+              className="bg-gray-200 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-300 transition-colors"
+            >
+              Logout
+            </button>
+          </div>
+        </div>
+
+        {/* Time Filter */}
+        <div className="bg-white rounded-lg shadow p-4 mb-8">
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center gap-4">
+              <Calendar size={20} className="text-gray-500" />
+              <select
+                value={timeFilter}
+                onChange={(e) => setTimeFilter(e.target.value)}
+                className="rounded-md border-gray-300 shadow-sm focus:border-emerald-500 focus:ring focus:ring-emerald-200"
+              >
+                {timeFilters.map(filter => (
+                  <option key={filter} value={filter}>{filter}</option>
+                ))}
+              </select>
+            </div>
+            
+            {timeFilter === 'Custom Range' && (
+              <div className="flex items-center gap-4 pl-8">
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-gray-600">From:</label>
+                  <input
+                    type="date"
+                    value={customStartDate}
+                    onChange={(e) => setCustomStartDate(e.target.value)}
+                    className="rounded-md border-gray-300 shadow-sm focus:border-emerald-500 focus:ring focus:ring-emerald-200"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-gray-600">To:</label>
+                  <input
+                    type="date"
+                    value={customEndDate}
+                    onChange={(e) => setCustomEndDate(e.target.value)}
+                    className="rounded-md border-gray-300 shadow-sm focus:border-emerald-500 focus:ring focus:ring-emerald-200"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
         
         {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
@@ -409,7 +639,7 @@ function App() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {activeTab === 'expenses' && expenses.map((expense) => (
+                {activeTab === 'expenses' && filteredExpenses.map((expense) => (
                   <tr key={expense._id}>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {new Date(expense.date).toLocaleDateString()}
@@ -427,7 +657,7 @@ function App() {
                     </td>
                   </tr>
                 ))}
-                {activeTab === 'income' && incomes.map((income) => (
+                {activeTab === 'income' && filteredIncomes.map((income) => (
                   <tr key={income._id}>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {new Date(income.date).toLocaleDateString()}
@@ -444,7 +674,7 @@ function App() {
                     </td>
                   </tr>
                 ))}
-                {activeTab === 'investments' && investments.map((investment) => (
+                {activeTab === 'investments' && filteredInvestments.map((investment) => (
                   <tr key={investment._id}>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {new Date(investment.date).toLocaleDateString()}
